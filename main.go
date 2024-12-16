@@ -1,10 +1,24 @@
 package main
 
-import "net/http"
+import (
+	"net/http"
+	"sync/atomic"
+)
 
 func main() {
+	config := apiConfig{
+		fileServerHits: atomic.Int32{},
+	}
+
 	httpServerMux := http.NewServeMux()
-	httpServerMux.Handle("/", http.FileServer(http.Dir(".")))
+	httpServerMux.Handle(
+		"/app/",
+		config.middlewareMetricsInc(http.StripPrefix("/app", http.FileServer(http.Dir(".")))),
+	)
+	httpServerMux.HandleFunc(
+		"/admin/metrics/", config.AdminMetrics)
+	httpServerMux.HandleFunc("GET /api/healthz", Healthz)
+	httpServerMux.HandleFunc("POST /admin/reset", config.Reset)
 	httpServer := http.Server{
 		Addr:    ":8080",
 		Handler: httpServerMux,
