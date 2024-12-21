@@ -1,2 +1,0 @@
-# GET healthz
-GET http://localhost:8080/api/healthz

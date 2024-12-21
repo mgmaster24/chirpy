@@ -1,0 +1,11 @@
+# GET healthz
+GET http://localhost:8080/api/healthz
+
+###
+# POST validate_chirp
+POST http://localhost:8080/api/validate_chirp
+content-type: application/json
+
+{
+  "body": "I had something interesting for breakfast"
+}
