@@ -1,85 +1,67 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strings"
+
+	"github.com/google/uuid"
+
+	"github.com/mgmaster24/chirpy/internal/auth"
+	"github.com/mgmaster24/chirpy/internal/database"
 )
 
-func Healthz(writer http.ResponseWriter, req *http.Request) {
+func healthz(writer http.ResponseWriter, req *http.Request) {
 	req.Header.Add("Content-Type", "text/plain; charset=utf-8")
 	writer.WriteHeader(http.StatusOK)
 	writer.Write([]byte("OK"))
 }
 
-func (cfg *apiConfig) AdminMetrics(writer http.ResponseWriter, req *http.Request) {
-	req.Header.Add("Content-Type", "tex/html; charset=utf-8")
-	writer.WriteHeader(http.StatusOK)
-	hits := cfg.fileServerHits.Load()
-	html := `
-		<html>
-  		<body>
-    		<h1>Welcome, Chirpy Admin</h1>
-    		<p>Chirpy has been visited %d times!</p>
-  		</body>
-		</html>`
-
-	html = fmt.Sprintf(html, hits)
-	writer.Write([]byte(html))
-}
-
-func (cfg *apiConfig) Reset(writer http.ResponseWriter, req *http.Request) {
-	req.Header.Add("Content-Type", "text/plain; charset=utf-8")
-	req.Header.Add("Cache-Control", "no-cache")
-	writer.WriteHeader(http.StatusOK)
-	cfg.fileServerHits.Store(0)
-	writer.Write([]byte("Reset Successful"))
-}
-
-func ValidateChirp(w http.ResponseWriter, r *http.Request) {
-	type chirp struct {
-		Body string `json:"body"`
+func (cfg *apiConfig) polka_ep(w http.ResponseWriter, r *http.Request) {
+	type input struct {
+		Event string `json:"event"`
+		Data  struct {
+			UserId uuid.UUID `json:"user_id"`
+		} `json:"data"`
 	}
 
-	type cleaned struct {
-		CleanedBody string `json:"cleaned_body"`
+	key, err := auth.GetAPIKeys(r.Header)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "key not found", err)
+		return
 	}
 
+	if key != cfg.polkaKey {
+		fmt.Println("Key", key)
+		fmt.Println("Server Key", cfg.polkaKey)
+		respondWithError(w, http.StatusUnauthorized, "Incorrect key provided", err)
+		return
+	}
+
+	in := input{}
 	decoder := json.NewDecoder(r.Body)
-	chrp := chirp{}
-	w.Header().Add("Content-Type", "application/json")
-	err := decoder.Decode(&chrp)
+	err = decoder.Decode(&in)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Couldn't decode parameters", err)
 		return
 	}
 
-	if len(chrp.Body) > 140 {
-		respondWithError(w, http.StatusBadRequest, "Chirp is too long", nil)
+	if in.Event != "user.upgraded" {
+		respondWithJSON(w, http.StatusNoContent, nil)
 		return
 	}
 
-	profanities := map[string]struct{}{
-		"kerfuffle": {},
-		"sharbert":  {},
-		"fornax":    {},
-	}
-
-	cleanedBody := cleanBody(chrp.Body, profanities)
-	respondWithJSON(w, http.StatusOK, cleaned{
-		CleanedBody: cleanedBody,
+	_, err = cfg.db.MakeChirpyRed(r.Context(), database.MakeChirpyRedParams{
+		ID: in.Data.UserId,
+		IsChirpyRed: sql.NullBool{
+			Bool:  true,
+			Valid: true,
+		},
 	})
-}
-
-func cleanBody(body string, profanities map[string]struct{}) string {
-	words := strings.Split(body, " ")
-	for i, word := range words {
-		lowered := strings.ToLower(word)
-		if _, ok := profanities[lowered]; ok {
-			words[i] = "****"
-		}
+	if err != nil {
+		respondWithError(w, http.StatusNotFound, "User not found", err)
 	}
 
-	return strings.Join(words, " ")
+	respondWithJSON(w, http.StatusNoContent, nil)
 }
